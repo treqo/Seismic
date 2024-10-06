@@ -11,7 +11,7 @@ from obspy.signal.filter import highpass
 from obspy.signal.trigger import classic_sta_lta, plot_trigger, trigger_onset
 
 class DataHandler:
-    def __init__(self, data_directory: str):
+    def __init__(self, data_directory: str, arrival_time: float = None):
         """
         Initialize the DataHandler class with the data directory path. 
 
@@ -22,7 +22,9 @@ class DataHandler:
         self.data_stream = read(self.data_directory)
         self.stats = self.data_stream[0].stats
         self.filename = os.path.basename(self.data_directory)
-        print(f"Data loaded from {self.filename} with {len(self.data_stream)} traces.")
+        self.arrival_time = arrival_time
+
+        print(f"Data loaded from {self.filename} with {len(self.data_stream)} traces. Arrival time: {self.arrival_time}")
     
     def get_plot(self, data = None):
         """
@@ -45,6 +47,10 @@ class DataHandler:
 
         # Plot trace
         ax.plot(tr_times,tr_data)
+
+        if(self.arrival_time is not None):
+            ax.axvline(x =  self.arrival_time, color='red',label='Arrival time')
+            ax.legend(loc='upper left')
 
         # Make the plot pretty
         ax.set_xlim([min(tr_times),max(tr_times)])
@@ -135,23 +141,89 @@ class DataHandler:
         tr_copy.data = np.pow(tr_copy.data, 2)
         return tr_copy
     
+    def squared_norm_data(self, data = None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_copy = tr.copy()
+
+        tr_copy.data = np.pow(tr_copy.data, 2)
+        tr_copy.data = tr_copy.data / np.max(tr_copy.data)
+        return tr_copy
+
+    def norm_data(self, data = None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_copy = tr.copy()
+
+        tr_copy.data = tr_copy.data / (2*np.max(tr_copy.data)) + 0.5
+        return tr_copy
+    
+    def preprocess_data(self, data = None, window_size = 1000, step_size = 500, output_dir = None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        if output_dir is None:
+            output_dir = './output'
+
+        segments = []
+        labels = []
+        start_times = []
+
+        for i in range(0, len(tr.data), step_size):
+            if i + window_size > len(tr.data):
+                segment = tr.data[-window_size:]
+            else:
+                segment = tr.data[i:i+window_size]
+            segments.append(segment)
+            start_times.append(i)
+            if i < self.arrival_time and i + window_size > self.arrival_time:
+                labels.append(1)
+            else:
+                labels.append(0)
+
+        df_segments = pd.DataFrame(segments)
+        df_segments['label'] = labels
+        df_segments['start_time'] = start_times
+
+        df_segments.to_csv(f'{output_dir}/{self.filename.split(".mseed")[0]}.csv', index=False)
+                
+    
 if __name__ == '__main__':
-    # Path to the data directory
-    DATA_DIRECTORY = "./data/lunar/training/data/S12_GradeA/xa.s12.00.mhz.1973-07-04HR00_evid00114.mseed"
-    # Initialize the DataHandler class
-    data_handler = DataHandler(DATA_DIRECTORY)
+    catalog_path = "./data/lunar/training/catalogs/apollo12_catalog_GradeA_final.csv"
+    catalog = pd.read_csv(catalog_path)
 
-    # Print the metadata of the data stream
-    print(data_handler.stats)
+    for index in range(len(catalog)):
+        print(f"Index: {index} - {catalog.loc[index, 'filename']}")
+        # index = 0
+        file = catalog.loc[index, "filename"]
+        arrival_time = catalog.loc[index, "time_rel(sec)"]
 
-    data_handler.get_plot()
-    # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
-    # data_handler.get_plot(data_handler.apply_filter('lowpass', 3))
-    # data_handler.get_plot(data_handler.apply_filter('highpass', 2))
-    # data_handler.get_plot(data_handler.apply_filter('highpass', 0.9))
-    # data_handler.LTA_STA_detection_algorithm(data_handler.apply_filter('highpass', 0.9))
+        # Path to the data directory
+        DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
+        # Initialize the DataHandler class
+        data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
 
-    data_handler.get_plot(data_handler.squared_data())
+        # Print the metadata of the data stream
+        print(data_handler.stats)
+
+        # data_handler.get_plot()
+        # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
+        # data_handler.get_plot(data_handler.apply_filter('lowpass', 3))
+        # data_handler.get_plot(data_handler.apply_filter('highpass', 2))
+        # data_handler.get_plot(data_handler.apply_filter('highpass', 0.9))
+        # data_handler.LTA_STA_detection_algorithm(data_handler.apply_filter('highpass', 0.9))
+
+        # data_handler.get_plot(data_handler.squared_data())
+        # data_handler.get_plot(data_handler.norm_data())
+        data_handler.preprocess_data(data=data_handler.squared_norm_data(),window_size=10000, step_size=5000, output_dir='./output')
 
 
 
