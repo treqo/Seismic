@@ -24,7 +24,7 @@ class DataHandler:
         self.filename = os.path.basename(self.data_directory)
         self.arrival_time = arrival_time
     
-    def get_plot(self, data = None):
+    def get_plot(self, data = None, arrival_time = None):
         """
         Plot the data stream.
 
@@ -46,7 +46,10 @@ class DataHandler:
         # Plot trace
         ax.plot(tr_times,tr_data)
 
-        if(self.arrival_time is not None):
+        if(arrival_time is not None):
+            ax.axvline(x =  arrival_time, color='red',label='Arrival time')
+            ax.legend(loc='upper left')
+        elif(self.arrival_time is not None):
             ax.axvline(x =  self.arrival_time, color='red',label='Arrival time')
             ax.legend(loc='upper left')
 
@@ -107,6 +110,10 @@ class DataHandler:
 
         ax.title.set_text('STA/LTA characteristic function')
 
+        if(self.arrival_time is not None):
+            ax.axvline(x =  self.arrival_time, color='red',label='Arrival time')
+            ax.legend(loc='upper left')
+
         plt.show()
 
         # Play around with the on and off triggers, based on values in the characteristic function
@@ -136,7 +143,7 @@ class DataHandler:
 
         
 
-        tr.data = np.pow(tr.data, 2)
+        tr.data = np.power(tr.data, 2)
         return tr
     
     def squared_norm_data(self, data = None):
@@ -147,7 +154,19 @@ class DataHandler:
 
         
 
-        tr.data = np.pow(tr.data, 2)
+        tr.data = np.power(tr.data, 2)
+        tr.data = tr.data / np.max(tr.data)
+        return tr
+    
+    def absolute_norm_data(self, data = None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        
+
+        tr.data = np.abs(tr.data)
         tr.data = tr.data / np.max(tr.data)
         return tr
 
@@ -199,19 +218,35 @@ class DataHandler:
         else:
             tr = self.data_stream.traces[0].copy()
 
-        # Create a copy of the data for filtering
         tr_copy = tr.copy()
         
-        # Ensure the data array is not modified directly
-        tr_copy.data = np.zeros_like(tr.data)  # Initialize with zeros or the same shape
+        tr_copy.data = np.zeros_like(tr.data)
         
         half_window = window_size // 2
         
-        # Apply the moving average filter using a manual loop
         for i in range(half_window, len(tr.data) - half_window):
             tr_copy.data[i] = np.mean(tr.data[i - half_window:i + half_window + 1])
 
-        # Optionally handle edges (if required)
+        tr_copy.data[:half_window] = tr.data[:half_window]  # Leave initial values unchanged
+        tr_copy.data[-half_window:] = tr.data[-half_window:]  # Leave final values unchanged
+
+        return tr_copy
+
+    def moving_sum_filter(self, data=None, window_size=7):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_copy = tr.copy()
+        
+        tr_copy.data = np.zeros_like(tr.data)
+
+        half_window = window_size // 2
+
+        for i in range(half_window, len(tr.data) - half_window):
+            tr_copy.data[i] = np.sum(tr.data[i - half_window:i + half_window + 1])
+
         tr_copy.data[:half_window] = tr.data[:half_window]  # Leave initial values unchanged
         tr_copy.data[-half_window:] = tr.data[-half_window:]  # Leave final values unchanged
 
@@ -231,6 +266,10 @@ class DataHandler:
         start_time = self.arrival_time - delta
         end_time = self.arrival_time + delta
 
+        # mask = (tr_times >= start_time) & (tr_times <= end_time)
+        # tr_times_window = tr_times[mask]
+        # tr_data_window = tr_data[mask]
+
         fig, ax = plt.subplots(1, 1, figsize=(10, 3))
         ax.plot(tr_times, tr_data)
         # ax.plot(tr_times_window, tr_data_window)
@@ -240,6 +279,67 @@ class DataHandler:
         ax.set_ylabel('Velocity (m/s)')
         ax.set_xlabel('Time (s)')
         plt.show()
+
+    def find_spikes(self, data=None, window_size=1000, threshold=0.5):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        spikes = []
+
+        tr_times = tr.times()
+        tr_data = tr.data
+
+        for i in range(0, len(tr.data), window_size//2):
+            segment = tr_data[i:i+window_size]
+            if np.max(segment) - np.min(segment) > threshold and np.argmin(segment) < np.argmax(segment):
+                spikes.append(np.argmax(segment) + i)
+
+        print(spikes)
+
+        return spikes
+    
+    def find_arrival(self, data=None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_times = tr.times()
+        tr_data = tr.data
+
+        arrival_index = np.argmax(tr_data)
+        
+        arrival_time = tr_times[np.argmin(tr_data[arrival_index - 10000:arrival_index]) + arrival_index - 10000]
+
+        return arrival_time
+
+    
+    def window_z_score_filter(self, data=None, window_size=1000):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_copy = tr.copy()
+        tr_copy.data = np.zeros_like(tr.data)
+
+        half_window = window_size // 2
+
+        for i in range(half_window, len(tr.data) - half_window):
+            window = tr.data[i - half_window:i + half_window + 1]
+            mean = np.mean(window)
+            std = np.std(window)
+
+            z_score = (tr.data[i] - mean) / std
+            tr_copy.data[i] = tr.data[i] if np.abs(z_score) <= 3 else 0
+
+        tr_copy.data[:half_window] = tr.data[:half_window]
+        tr_copy.data[-half_window:] = tr.data[-half_window:]
+
+        return tr_copy
+
                 
     
 if __name__ == '__main__':
@@ -247,18 +347,21 @@ if __name__ == '__main__':
     catalog = pd.read_csv(catalog_path)
 
     # for index in range(len(catalog)):
-        # print(f"Index: {index} - {catalog.loc[index, 'filename']}")
-    index = 27
+    #     print(f"Index: {index} - {catalog.loc[index, 'filename']}")
+    index = 11
     file = catalog.loc[index, "filename"]
     arrival_time = catalog.loc[index, "time_rel(sec)"]
+
+    # file = "xa.s12.00.mhz.1975-06-15HR00_evid00660"
 
     # Path to the data directory
     DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
     # Initialize the DataHandler class
     data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
+    # data_handler = DataHandler(DATA_DIRECTORY)
 
     # Print the metadata of the data stream
-    print(data_handler.stats)
+    # print(data_handler.stats)
 
     data_handler.get_plot()
     # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
@@ -273,6 +376,21 @@ if __name__ == '__main__':
     # data_handler.get_plot(data_handler.moving_average_filter(data=data_handler.squared_norm_data(),window_size=101))
 
     # data_handler.get_plot(data_handler.arrival_window(data=data_handler.squared_norm_data()))
-    data_handler.plot_arrival()
+    # data_handler.find_spikes(data=data_handler.squared_norm_data(), window_size=1000, threshold=0.5)
+    # data_handler.plot_arrival(data_handler.squared_norm_data())
+    # data_handler.plot_arrival(data_handler.moving_average_filter(data=data_handler.squared_norm_data(),window_size=3003))
+    # data_handler.LTA_STA_detection_algorithm(data_handler.moving_average_filter(data=data_handler.squared_norm_data(),window_size=3003), sta_len=3003, lta_len=7000, thr_on=4, thr_off=1.5)
+
+    # data_handler.get_plot(data_handler, data_handler.find_arrival(data=data_handler.moving_average_filter(data=data_handler.squared_norm_data(),window_size=3003)))
+    # Get the moving average filtered data
+    filtered_data = data_handler.moving_average_filter(data=data_handler.moving_sum_filter(data=data_handler.absolute_norm_data(data=data_handler.window_z_score_filter(window_size=5005)), window_size=7), window_size=3003)
+
+    # Find the arrival time using the filtered data
+    arrival_time = data_handler.find_arrival(data=filtered_data)
+
+    # Now call get_plot with the filtered data and the arrival time
+    data_handler.get_plot(data=filtered_data, arrival_time=arrival_time)
+
+    # data_handler.LTA_STA_detection_algorithm(data_handler.squared_norm_data(), sta_len=5000, lta_len=10000, thr_on=4, thr_off=1.5)
 
 
