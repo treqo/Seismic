@@ -121,6 +121,40 @@ class DataHandler:
 
         plt.show()
 
+        return on_off
+
+    def export_detection_catalog(self, on_off, tr, output_dir='./output_catalog'):
+        """
+        Export detection times into a catalog CSV file.
+
+        :param on_off: Array of trigger onset and offset times.
+        :param tr: Trace data for obtaining timing information.
+        :param output_dir: Directory to save catalog.
+        """
+        fname = self.filename
+        starttime = tr.stats.starttime.datetime
+        detection_times = []
+        fnames = []
+
+        # Iterate through detection times and compile them
+        for triggers in on_off:
+            on_time = starttime + timedelta(seconds=tr.times()[triggers[0]])
+            on_time_str = datetime.strftime(on_time, '%Y-%m-%dT%H:%M:%S.%f')
+            detection_times.append(on_time_str)
+            fnames.append(fname)
+
+        # Compile dataframe of detections
+        detect_df = pd.DataFrame(data={'filename': fnames, 
+                                       'time_abs(%Y-%m-%dT%H:%M:%S.%f)': detection_times, 
+                                       'time_rel(sec)': tr.times()[on_off[:, 0]]})
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        output_file = f'{output_dir}/{fname.split(".mseed")[0]}_detection_catalog.csv'
+        detect_df.to_csv(output_file, index=False)
+        print(f"Detection catalog saved to {output_file}")
+
     def squared_data(self, data=None):
         """
         Square the trace data.
@@ -193,27 +227,6 @@ class DataHandler:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         
-        output_file = f'{output_dir}/{self.filename.split(".mseed")[0]}.csv'
+        output_file = f"{output_dir}/{self.filename.split('.mseed')[0]}_segmented.csv"
         df_segments.to_csv(output_file, index=False)
-        print(f"Data preprocessed and saved to {output_file}")
-
-# Example usage
-if __name__ == '__main__':
-    catalog_path = "./data/lunar/training/catalogs/apollo12_catalog_GradeA_final.csv"
-    catalog = pd.read_csv(catalog_path)
-
-    for index in range(len(catalog)):
-        print(f"Index: {index} - {catalog.loc[index, 'filename']}")
-        file = catalog.loc[index, "filename"]
-        arrival_time = catalog.loc[index, "time_rel(sec)"]
-
-        # Path to the data directory
-        DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
-        # Initialize the DataHandler class
-        data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
-
-        # Print the metadata of the data stream
-        print(data_handler.stats)
-
-        # Example preprocessing
-        data_handler.preprocess_data(data=data_handler.squared_norm_data(), window_size=10000, step_size=5000, output_dir='./output')
+        print(f"Segmented data saved to {output_file}")
