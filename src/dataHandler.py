@@ -1,132 +1,219 @@
 # Import libraries
 import numpy as np
+import pandas as pd
 from obspy import read
-from datetime import datetime
+from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-from scipy import signal
-from matplotlib import cm
+import os
+
+from obspy.signal.invsim import cosine_taper
+from obspy.signal.filter import highpass
+from obspy.signal.trigger import classic_sta_lta, plot_trigger, trigger_onset
 
 class DataHandler:
-    def __init__(self, data_directory: str, arrival_time: datetime = None):
+    def __init__(self, data_directory: str, arrival_time: float = None):
         """
-        Initialize the DataHandler class with the data directory path and optional arrival time.
+        Initialize the DataHandler class with the data directory path. 
 
         :param data_directory: Path to the .mseed file
-        :param arrival_time: Optional, absolute time of quake arrival (datetime object)
+        :param arrival_time: Arrival time in seconds
         """
         self.data_directory = data_directory
         self.data_stream = read(self.data_directory)
         self.stats = self.data_stream[0].stats
-        self.arrival_time = arrival_time  # Arrival time of the quake, if known
+        self.filename = os.path.basename(self.data_directory)
+        self.arrival_time = arrival_time
 
-    def get_trace_data(self):
+        print(f"Data loaded from {self.filename} with {len(self.data_stream)} traces. Arrival time: {self.arrival_time}")
+    
+    def get_plot(self, data=None):
         """
-        Get trace times and data from the seismic data stream.
-        :return: tuple (tr_times, tr_data) - times and seismic data
+        Plot the data stream.
+
+        :param data: Trace to plot. If None, the original data with no filters will be plotted.
         """
-        tr = self.data_stream.traces[0].copy()
+        tr = data if data is not None else self.data_stream.traces[0].copy()
         tr_times = tr.times()
         tr_data = tr.data
-        return tr_times, tr_data
-
-    def calculate_relative_arrival(self):
-        """
-        Calculate the relative arrival time of the quake in seconds.
-        This method requires self.arrival_time to be set.
-        :return: Arrival time in seconds relative to the start of the trace.
-        """
-        if not self.arrival_time:
-            raise ValueError("Arrival time not set. Please provide the arrival time.")
         
-        # Get the start time from the seismic trace metadata
-        starttime = self.stats.starttime.datetime
-        
-        # Calculate the relative arrival time (in seconds)
-        relative_arrival = (self.arrival_time - starttime).total_seconds()
-        return relative_arrival
+        # Initialize figure
+        fig, ax = plt.subplots(1, 1, figsize=(10, 3))
 
-    def apply_filter(self, filter_type: str, freqmin: float, freqmax: float):
+        # Plot trace
+        ax.plot(tr_times, tr_data)
+
+        if self.arrival_time is not None:
+            ax.axvline(x=self.arrival_time, color='red', label='Arrival time')
+            ax.legend(loc='upper left')
+
+        # Make the plot pretty
+        ax.set_xlim([min(tr_times), max(tr_times)])
+        ax.set_ylabel('Velocity (m/s)')
+        ax.set_xlabel('Time (s)')
+        ax.set_title(f'{self.filename}', fontweight='bold')
+
+        plt.show()
+
+    def apply_filter(self, filter_type: str, *args):
         """
         Apply a filter to the data stream.
 
         :param filter_type: Type of filter to apply. Options are 'bandpass', 'lowpass', 'highpass'
-        :param freqmin: Minimum frequency for the filter
-        :param freqmax: Maximum frequency for the filter
+        :param args: Arguments for the filter. For 'bandpass' filter, pass the lower and upper frequency limits. For 'lowpass' and 'highpass' filters, pass the frequency limit.
 
-        :return: Filtered trace data
+        :return: Filtered trace
         """
-        st_filt = self.data_stream.copy() 
-        st_filt.filter(filter_type, freqmin=freqmin, freqmax=freqmax)
+        tr_copy = self.data_stream.traces[0].copy()
 
-        # Return filtered trace, times and data
-        tr_filt = st_filt.traces[0].copy()
-        tr_times_filt = tr_filt.times()
-        tr_data_filt = tr_filt.data
-        return tr_times_filt, tr_data_filt, tr_filt.stats.sampling_rate
+        if filter_type == 'bandpass':
+            freqmin, freqmax = args
+            tr_copy.filter('bandpass', freqmin=freqmin, freqmax=freqmax)
+        elif filter_type == 'lowpass':
+            freqmax = args[0]
+            tr_copy.filter('lowpass', freq=freqmax)
+        elif filter_type == 'highpass':
+            freqmin = args[0]
+            tr_copy.filter('highpass', freq=freqmin)
+        
+        return tr_copy
 
-    def plot_time_series_and_spectrogram(self, minfreq=0.01, maxfreq=0.5, plot_title='Filtered Seismic Data'):
+    def LTA_STA_detection_algorithm(self, data=None, sta_len=120, lta_len=600, thr_on=4, thr_off=1.5):
         """
-        Plot the time series and the corresponding spectrogram.
+        Perform STA/LTA detection to identify events.
 
-        :param minfreq: Minimum frequency for the bandpass filter
-        :param maxfreq: Maximum frequency for the bandpass filter
-        :param plot_title: Title for the time series plot
+        :param data: Trace to perform detection on. If None, the original data is used.
+        :param sta_len: Short-term average window length
+        :param lta_len: Long-term average window length
+        :param thr_on: Trigger on threshold
+        :param thr_off: Trigger off threshold
         """
-        # Apply bandpass filter to the data
-        tr_times_filt, tr_data_filt, sampling_rate = self.apply_filter('bandpass', minfreq, maxfreq)
-        
-        # Calculate spectrogram
-        f, t, sxx = signal.spectrogram(tr_data_filt, sampling_rate)
-        
-        # Plot the time series and the spectrogram
-        fig = plt.figure(figsize=(10, 10))
-        
-        # Time series plot
-        ax = plt.subplot(2, 1, 1)
-        ax.plot(tr_times_filt, tr_data_filt, label="Filtered Seismic Trace")
-        
-        # Mark quake detection if arrival time is provided
-        if self.arrival_time:
-            relative_arrival = self.calculate_relative_arrival()
-            ax.axvline(x=relative_arrival, color='red', label='Quake Arrival')
-            ax.legend(loc='upper left')
-        
-        # Beautify the time series plot
-        ax.set_xlim([min(tr_times_filt), max(tr_times_filt)])
-        ax.set_ylabel('Velocity (m/s)')
+        tr = data if data is not None else self.data_stream.traces[0].copy()
+
+        tr_times = tr.times()
+        tr_data = tr.data
+        df = tr.stats.sampling_rate
+
+        # Run STA/LTA detection
+        cft = classic_sta_lta(tr_data, int(sta_len * df), int(lta_len * df))
+
+        # Plot characteristic function
+        fig, ax = plt.subplots(1, 1, figsize=(12, 3))
+        ax.plot(tr_times, cft)
+        ax.set_xlim([min(tr_times), max(tr_times)])
         ax.set_xlabel('Time (s)')
-        ax.set_title(plot_title, fontweight='bold')
+        ax.set_ylabel('Characteristic function')
+        ax.title.set_text('STA/LTA characteristic function')
 
-        # Spectrogram plot
-        ax2 = plt.subplot(2, 1, 2)
-        vals = ax2.pcolormesh(t, f, sxx, cmap=cm.jet, vmax=5e-17)
-        ax2.set_ylabel('Frequency (Hz)', fontweight='bold')
-        ax2.set_xlabel('Time (s)', fontweight='bold')
-        
-        # Mark arrival on the spectrogram plot
-        if self.arrival_time:
-            ax2.axvline(x=relative_arrival, c='red')
-        
-        # Add colorbar to spectrogram
-        cbar = plt.colorbar(vals, orientation='horizontal')
-        cbar.set_label('Power ((m/s)^2/sqrt(Hz))', fontweight='bold')
-        
-        plt.tight_layout()
         plt.show()
+
+        # Get the triggers
+        on_off = np.array(trigger_onset(cft, thr_on, thr_off))
+
+        # Plot triggers
+        fig, ax = plt.subplots(1, 1, figsize=(12, 3))
+        for triggers in on_off:
+            ax.axvline(x=tr_times[triggers[0]], color='red', label='Trig. On')
+            ax.axvline(x=tr_times[triggers[1]], color='purple', label='Trig. Off')
+
+        ax.plot(tr_times, tr_data)
+        ax.set_xlim([min(tr_times), max(tr_times)])
+        ax.legend()
+
+        plt.show()
+
+    def squared_data(self, data=None):
+        """
+        Square the trace data.
+
+        :param data: Trace to square. If None, the original data is used.
+        :return: Squared trace
+        """
+        tr = data if data is not None else self.data_stream.traces[0].copy()
+        tr_copy = tr.copy()
+        tr_copy.data = np.power(tr_copy.data, 2)
+        return tr_copy
+    
+    def squared_norm_data(self, data=None):
+        """
+        Square and normalize the trace data.
+
+        :param data: Trace to square and normalize. If None, the original data is used.
+        :return: Squared and normalized trace
+        """
+        tr = data if data is not None else self.data_stream.traces[0].copy()
+        tr_copy = tr.copy()
+        tr_copy.data = np.power(tr_copy.data, 2)
+        tr_copy.data = tr_copy.data / np.max(tr_copy.data)
+        return tr_copy
+
+    def norm_data(self, data=None):
+        """
+        Normalize the trace data.
+
+        :param data: Trace to normalize. If None, the original data is used.
+        :return: Normalized trace
+        """
+        tr = data if data is not None else self.data_stream.traces[0].copy()
+        tr_copy = tr.copy()
+        tr_copy.data = tr_copy.data / (2 * np.max(tr_copy.data)) + 0.5
+        return tr_copy
+    
+    def preprocess_data(self, data=None, window_size=1000, step_size=500, output_dir=None):
+        """
+        Preprocess the data into segments for further analysis.
+
+        :param data: Trace to preprocess. If None, the original data is used.
+        :param window_size: Size of the data window
+        :param step_size: Step size between windows
+        :param output_dir: Directory to save preprocessed data
+        """
+        tr = data if data is not None else self.data_stream.traces[0].copy()
+        output_dir = output_dir or './output'
+
+        segments = []
+        labels = []
+        start_times = []
+
+        for i in range(0, len(tr.data), step_size):
+            if i + window_size > len(tr.data):
+                segment = tr.data[-window_size:]
+            else:
+                segment = tr.data[i:i + window_size]
+            segments.append(segment)
+            start_times.append(i)
+            if i < self.arrival_time and i + window_size > self.arrival_time:
+                labels.append(1)
+            else:
+                labels.append(0)
+
+        df_segments = pd.DataFrame(segments)
+        df_segments['label'] = labels
+        df_segments['start_time'] = start_times
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        output_file = f'{output_dir}/{self.filename.split(".mseed")[0]}.csv'
+        df_segments.to_csv(output_file, index=False)
+        print(f"Data preprocessed and saved to {output_file}")
 
 # Example usage
 if __name__ == '__main__':
-    # Path to the data directory
-    DATA_DIRECTORY = "../data/lunar/training/data/S12_GradeA/xa.s12.00.mhz.1970-06-26HR00_evid00009.mseed"
-    
-    # Example quake arrival time (replace with actual data)
-    ARRIVAL_TIME = datetime(1970, 6, 26, 20, 0, 59, 884000)
-    
-    # Initialize the DataHandler class with arrival time
-    data_handler = DataHandler(DATA_DIRECTORY, arrival_time=ARRIVAL_TIME)
+    catalog_path = "./data/lunar/training/catalogs/apollo12_catalog_GradeA_final.csv"
+    catalog = pd.read_csv(catalog_path)
 
-    # Print the metadata of the data stream
-    print(data_handler.stats)
+    for index in range(len(catalog)):
+        print(f"Index: {index} - {catalog.loc[index, 'filename']}")
+        file = catalog.loc[index, "filename"]
+        arrival_time = catalog.loc[index, "time_rel(sec)"]
 
-    # Plot time series and spectrogram after applying bandpass filter
-    data_handler.plot_time_series_and_spectrogram(minfreq=0.01, maxfreq=0.5, plot_title='Filtered Seismic Data with Quake Arrival')
+        # Path to the data directory
+        DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
+        # Initialize the DataHandler class
+        data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
+
+        # Print the metadata of the data stream
+        print(data_handler.stats)
+
+        # Example preprocessing
+        data_handler.preprocess_data(data=data_handler.squared_norm_data(), window_size=10000, step_size=5000, output_dir='./output')
