@@ -23,8 +23,6 @@ class DataHandler:
         self.stats = self.data_stream[0].stats
         self.filename = os.path.basename(self.data_directory)
         self.arrival_time = arrival_time
-
-        print(f"Data loaded from {self.filename} with {len(self.data_stream)} traces. Arrival time: {self.arrival_time}")
     
     def get_plot(self, data = None):
         """
@@ -136,10 +134,10 @@ class DataHandler:
         else:
             tr = self.data_stream.traces[0].copy()
 
-        tr_copy = tr.copy()
+        
 
-        tr_copy.data = np.pow(tr_copy.data, 2)
-        return tr_copy
+        tr.data = np.pow(tr.data, 2)
+        return tr
     
     def squared_norm_data(self, data = None):
         if data is not None:
@@ -147,11 +145,11 @@ class DataHandler:
         else:
             tr = self.data_stream.traces[0].copy()
 
-        tr_copy = tr.copy()
+        
 
-        tr_copy.data = np.pow(tr_copy.data, 2)
-        tr_copy.data = tr_copy.data / np.max(tr_copy.data)
-        return tr_copy
+        tr.data = np.pow(tr.data, 2)
+        tr.data = tr.data / np.max(tr.data)
+        return tr
 
     def norm_data(self, data = None):
         if data is not None:
@@ -159,10 +157,10 @@ class DataHandler:
         else:
             tr = self.data_stream.traces[0].copy()
 
-        tr_copy = tr.copy()
+        
 
-        tr_copy.data = tr_copy.data / (2*np.max(tr_copy.data)) + 0.5
-        return tr_copy
+        tr.data = tr.data / (2*np.max(tr.data)) + 0.5
+        return tr
     
     def preprocess_data(self, data = None, window_size = 1000, step_size = 500, output_dir = None):
         if data is not None:
@@ -194,36 +192,87 @@ class DataHandler:
         df_segments['start_time'] = start_times
 
         df_segments.to_csv(f'{output_dir}/{self.filename.split(".mseed")[0]}.csv', index=False)
+
+    def moving_average_filter(self, data=None, window_size=7):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        # Create a copy of the data for filtering
+        tr_copy = tr.copy()
+        
+        # Ensure the data array is not modified directly
+        tr_copy.data = np.zeros_like(tr.data)  # Initialize with zeros or the same shape
+        
+        half_window = window_size // 2
+        
+        # Apply the moving average filter using a manual loop
+        for i in range(half_window, len(tr.data) - half_window):
+            tr_copy.data[i] = np.mean(tr.data[i - half_window:i + half_window + 1])
+
+        # Optionally handle edges (if required)
+        tr_copy.data[:half_window] = tr.data[:half_window]  # Leave initial values unchanged
+        tr_copy.data[-half_window:] = tr.data[-half_window:]  # Leave final values unchanged
+
+        return tr_copy
+    
+    def plot_arrival(self, data=None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+        
+        tr_times = tr.times()
+        tr_data = tr.data
+
+        delta = 3000
+
+        start_time = self.arrival_time - delta
+        end_time = self.arrival_time + delta
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 3))
+        ax.plot(tr_times, tr_data)
+        # ax.plot(tr_times_window, tr_data_window)
+        ax.axvline(x=self.arrival_time, color='red', label='Arrival time')
+        ax.legend(loc='upper left')
+        ax.set_xlim([start_time, end_time])
+        ax.set_ylabel('Velocity (m/s)')
+        ax.set_xlabel('Time (s)')
+        plt.show()
                 
     
 if __name__ == '__main__':
     catalog_path = "./data/lunar/training/catalogs/apollo12_catalog_GradeA_final.csv"
     catalog = pd.read_csv(catalog_path)
 
-    for index in range(len(catalog)):
-        print(f"Index: {index} - {catalog.loc[index, 'filename']}")
-        # index = 0
-        file = catalog.loc[index, "filename"]
-        arrival_time = catalog.loc[index, "time_rel(sec)"]
+    # for index in range(len(catalog)):
+        # print(f"Index: {index} - {catalog.loc[index, 'filename']}")
+    index = 27
+    file = catalog.loc[index, "filename"]
+    arrival_time = catalog.loc[index, "time_rel(sec)"]
 
-        # Path to the data directory
-        DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
-        # Initialize the DataHandler class
-        data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
+    # Path to the data directory
+    DATA_DIRECTORY = f"./data/lunar/training/data/S12_GradeA/{file}.mseed"
+    # Initialize the DataHandler class
+    data_handler = DataHandler(DATA_DIRECTORY, arrival_time)
 
-        # Print the metadata of the data stream
-        print(data_handler.stats)
+    # Print the metadata of the data stream
+    print(data_handler.stats)
 
-        # data_handler.get_plot()
-        # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
-        # data_handler.get_plot(data_handler.apply_filter('lowpass', 3))
-        # data_handler.get_plot(data_handler.apply_filter('highpass', 2))
-        # data_handler.get_plot(data_handler.apply_filter('highpass', 0.9))
-        # data_handler.LTA_STA_detection_algorithm(data_handler.apply_filter('highpass', 0.9))
+    data_handler.get_plot()
+    # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
+    # data_handler.get_plot(data_handler.apply_filter('lowpass', 3))
+    # data_handler.get_plot(data_handler.apply_filter('highpass', 2))
+    # data_handler.get_plot(data_handler.apply_filter('highpass', 0.9))
+    # data_handler.LTA_STA_detection_algorithm(data_handler.apply_filter('highpass', 0.9))
 
-        # data_handler.get_plot(data_handler.squared_data())
-        # data_handler.get_plot(data_handler.norm_data())
-        data_handler.preprocess_data(data=data_handler.squared_norm_data(),window_size=10000, step_size=5000, output_dir='./output')
+    # data_handler.get_plot(data_handler.norm_data())
+    # data_handler.preprocess_data(data=data_handler.squared_norm_data(),window_size=10000, step_size=5000, output_dir='./output')
+    # data_handler.get_plot(data_handler.squared_norm_data())
+    # data_handler.get_plot(data_handler.moving_average_filter(data=data_handler.squared_norm_data(),window_size=101))
 
+    # data_handler.get_plot(data_handler.arrival_window(data=data_handler.squared_norm_data()))
+    data_handler.plot_arrival()
 
 
