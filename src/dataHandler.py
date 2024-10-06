@@ -64,6 +64,7 @@ class DataHandler:
         :return: Filtered trace
         """
         tr_copy = self.data_stream.traces[0].copy() 
+        # tr_copy.data = np.abs(tr_copy.data)
 
         if filter_type == 'bandpass':
             freqmin, freqmax = args
@@ -77,7 +78,7 @@ class DataHandler:
         return tr_copy
     
 
-    def  LTA_STA_detection_algorithm(self, data = None, sta_len = 120, lta_len = 600, thr_on = 4, thr_off = 1.5):
+    def LTA_STA_detection_algorithm(self, data = None, sta_len = 120, lta_len = 600, thr_on = 4, thr_off = 1.5):
         if data is not None:
             tr = data
         else:
@@ -122,21 +123,35 @@ class DataHandler:
         ax.legend()
 
         plt.show()
+
+    def squared_data(self, data = None):
+        if data is not None:
+            tr = data
+        else:
+            tr = self.data_stream.traces[0].copy()
+
+        tr_copy = tr.copy()
+
+        tr_copy.data = np.pow(tr_copy.data, 2)
+        return tr_copy
     
 if __name__ == '__main__':
     # Path to the data directory
-    DATA_DIRECTORY = "./data/lunar/training/data/S12_GradeA/xa.s12.00.mhz.1970-06-26HR00_evid00009.mseed"
+    DATA_DIRECTORY = "./data/lunar/training/data/S12_GradeA/xa.s12.00.mhz.1973-07-04HR00_evid00114.mseed"
     # Initialize the DataHandler class
     data_handler = DataHandler(DATA_DIRECTORY)
 
     # Print the metadata of the data stream
     print(data_handler.stats)
 
-    # data_handler.get_plot()
+    data_handler.get_plot()
     # data_handler.get_plot(data_handler.apply_filter('bandpass', 0.99999, 1))
-    # data_handler.get_plot(data_handler.apply_filter('lowpass', 0.1))
+    # data_handler.get_plot(data_handler.apply_filter('lowpass', 3))
+    # data_handler.get_plot(data_handler.apply_filter('highpass', 2))
     # data_handler.get_plot(data_handler.apply_filter('highpass', 0.9))
-    data_handler.LTA_STA_detection_algorithm()
+    # data_handler.LTA_STA_detection_algorithm(data_handler.apply_filter('highpass', 0.9))
+
+    data_handler.get_plot(data_handler.squared_data())
 
 
 
